@@ -1,0 +1,6 @@
+# whisper-rs-sys generates its FFI bindings with bindgen at build time, which
+# requires libclang (LLVM) and CMake on the build machine. (The crate's
+# pre-generated bindings are stale relative to the bundled whisper.cpp and fail
+# to compile, so we cannot use WHISPER_DONT_GENERATE_BINDINGS.)
+#
+# End users need none of this — the produced binary statically links whisper.cpp.

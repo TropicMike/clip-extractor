@@ -1,0 +1,17 @@
+Source: sample.mp4
+Language: en (p=0.90, whisper base model)
+
+Full transcript:
+[0.00-8.00] What the fuck is this piece of shit?
+
+Word-level timestamps:
+4.94-5.54  What
+5.54-5.82  the
+5.82-6.22  fuck
+6.22-6.52  is
+6.52-6.80  this
+6.80-7.10  piece
+7.10-7.36  of
+7.36-7.78  shit?
+
+Best tight soundbite cut: 4.8 -> 8.0  (sample_soundbite.mp3)

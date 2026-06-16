@@ -1,0 +1,29 @@
+[package]
+name = "clip-extractor"
+version = "0.1.0"
+edition = "2021"
+description = "Transcribe a media file, browse the transcript, select a clip, and export it."
+
+[dependencies]
+eframe = "0.28"
+egui = "0.28"
+rfd = "0.14"               # native open/save file dialogs
+crossbeam-channel = "0.5"  # worker -> UI messaging for long-running jobs
+symphonia = { version = "0.5", features = ["all"] }  # decode -> waveform + PCM
+whisper-rs = "0.16"        # transcription (whisper.cpp bindings); needs CMake to build
+ureq = "2"                 # blocking HTTPS for on-demand model download (no async runtime)
+
+# Added at later milestones (see ARCHITECTURE.md):
+#   rodio            = "0.19"   # preview playback
+#   ureq             = "2"      # blocking model download (no async runtime)
+#   dirs             = "5"      # locate the per-user cache dir
+
+[features]
+# Embed ffmpeg + yt-dlp + the base whisper model into the binary and extract
+# them to the cache dir at runtime, for a single self-contained executable.
+# Off by default so dev builds stay fast; release/CI builds enable it and must
+# populate `vendor/<target-triple>/` and `models/` first (see ARCHITECTURE.md).
+embed-assets = []
+
+[profile.release]
+opt-level = 3

@@ -1,0 +1,108 @@
+name: release
+
+# Build a single self-contained binary per platform with ffmpeg + yt-dlp + the
+# base whisper model embedded (`--features embed-assets`).
+#
+# Build-machine requirements handled below: CMake + a C/C++ toolchain (to compile
+# whisper.cpp) and libclang/LLVM (bindgen generates the whisper-rs FFI bindings).
+# End users need none of this — whisper.cpp is statically linked and the sidecars
+# are embedded.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - name: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - name: macos-x86_64
+            os: macos-13
+            target: x86_64-apple-darwin
+          - name: macos-aarch64
+            os: macos-14
+            target: aarch64-apple-darwin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      # --- build toolchain: CMake + libclang ---
+      - name: Install CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Install LLVM (libclang) — Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y llvm-dev libclang-dev clang
+
+      - name: Install LLVM (libclang) — macOS
+        if: runner.os == 'macOS'
+        run: |
+          brew install llvm
+          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> "$GITHUB_ENV"
+
+      - name: Install LLVM (libclang) — Windows
+        if: runner.os == 'Windows'
+        run: |
+          choco install llvm -y
+          echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
+
+      # --- stage embedded assets (ffmpeg + yt-dlp + base model) ---
+      - name: Stage assets — Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $v = "vendor/${{ matrix.target }}"
+          New-Item -ItemType Directory -Force -Path $v, models | Out-Null
+          Invoke-WebRequest "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile ff.zip
+          Expand-Archive ff.zip -DestinationPath ff
+          Copy-Item (Get-ChildItem ff -Recurse -Filter ffmpeg.exe | Select-Object -First 1).FullName "$v/ffmpeg.exe"
+          Invoke-WebRequest "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile "$v/yt-dlp.exe"
+          Invoke-WebRequest "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin" -OutFile "models/ggml-base.en.bin"
+
+      - name: Stage assets — Linux
+        if: runner.os == 'Linux'
+        run: |
+          v="vendor/${{ matrix.target }}"; mkdir -p "$v" models
+          curl -L https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -o ff.tar.xz
+          tar xf ff.tar.xz && cp ffmpeg-*-static/ffmpeg "$v/ffmpeg"
+          curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux -o "$v/yt-dlp"
+          curl -L https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin -o models/ggml-base.en.bin
+
+      - name: Stage assets — macOS
+        if: runner.os == 'macOS'
+        run: |
+          v="vendor/${{ matrix.target }}"; mkdir -p "$v" models
+          curl -L https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip -o ff.zip
+          unzip -o ff.zip -d ff && cp ff/ffmpeg "$v/ffmpeg"
+          curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos -o "$v/yt-dlp"
+          curl -L https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin -o models/ggml-base.en.bin
+
+      - name: Build
+        run: cargo build --release --features embed-assets --target ${{ matrix.target }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip-extractor-${{ matrix.name }}
+          path: |
+            target/${{ matrix.target }}/release/clip-extractor
+            target/${{ matrix.target }}/release/clip-extractor.exe
+          if-no-files-found: ignore
