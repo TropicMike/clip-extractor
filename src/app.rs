@@ -15,6 +15,18 @@ use eframe::egui;
 
 use crate::model::{Handle, OutputFormat, Phase, WhisperModelKind, Word, WorkerMsg};
 
+/// Sample rate of the cached PCM used for preview playback (matches `audio.rs`).
+const PCM_SR: u32 = 16_000;
+
+/// Holds the live audio output for previewing the selection. The `OutputStream`
+/// must be kept alive for sound to play; `sink` is the currently playing clip
+/// (if any) and is stopped/replaced on each new play.
+struct Playback {
+    _stream: rodio::OutputStream,
+    handle: rodio::OutputStreamHandle,
+    sink: Option<rodio::Sink>,
+}
+
 pub struct ClipApp {
     file: Option<PathBuf>,
     duration: f32,
@@ -47,6 +59,8 @@ pub struct ClipApp {
     pcm16k: Option<Arc<Vec<f32>>>,
     /// Abort flag for the in-flight job (e.g. transcription), if cancellable.
     cancel: Option<Arc<AtomicBool>>,
+    /// Lazily-created audio output for previewing the selected range.
+    playback: Option<Playback>,
 }
 
 impl ClipApp {
@@ -54,11 +68,11 @@ impl ClipApp {
         let (tx, rx) = unbounded();
         let app = Self {
             file: None,
-            duration: 8.0,
-            samples: synth_waveform(8.0),
-            words: demo_words(),
-            sel_in: 4.8,
-            sel_out: 8.0,
+            duration: 0.0,
+            samples: Vec::new(),
+            words: Vec::new(),
+            sel_in: 0.0,
+            sel_out: 0.0,
             dragging: None,
             status: "Open a media file to begin.".to_owned(),
             source_input: String::new(),
@@ -71,6 +85,7 @@ impl ClipApp {
             phase: Phase::Idle,
             pcm16k: None,
             cancel: None,
+            playback: None,
         };
 
         // Prove the worker -> channel -> repaint -> drain path end-to-end: a
@@ -128,6 +143,7 @@ impl ClipApp {
                     duration,
                     pcm16k,
                 } => {
+                    self.stop_playback();
                     self.samples = samples;
                     self.duration = duration;
                     self.sel_in = 0.0;
@@ -288,24 +304,28 @@ impl eframe::App for ClipApp {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Transcript");
-            ui.label("Click a word to set the selection to that word.");
-            egui::ScrollArea::vertical()
-                .max_height(220.0)
-                .show(ui, |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        let words = self.words.clone();
-                        for w in &words {
-                            let selected = w.start >= self.sel_in && w.end <= self.sel_out;
-                            if ui
-                                .selectable_label(selected, format!("{} ", w.text))
-                                .clicked()
-                            {
-                                self.sel_in = w.start;
-                                self.sel_out = w.end;
+            if self.words.is_empty() {
+                ui.label("No transcript yet — load a source to transcribe it.");
+            } else {
+                ui.label("Click a word to set the selection to that word.");
+                egui::ScrollArea::vertical()
+                    .max_height(220.0)
+                    .show(ui, |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            let words = self.words.clone();
+                            for w in &words {
+                                let selected = w.start >= self.sel_in && w.end <= self.sel_out;
+                                if ui
+                                    .selectable_label(selected, format!("{} ", w.text))
+                                    .clicked()
+                                {
+                                    self.sel_in = w.start;
+                                    self.sel_out = w.end;
+                                }
                             }
-                        }
+                        });
                     });
-                });
+            }
 
             ui.separator();
             ui.heading("Waveform");
@@ -319,6 +339,18 @@ impl eframe::App for ClipApp {
                     self.sel_out,
                     (self.sel_out - self.sel_in).max(0.0)
                 ));
+
+                let playing = self.is_playing();
+                let can_play =
+                    self.pcm16k.is_some() && self.sel_out > self.sel_in;
+                let play_label = if playing { "⏹ Stop" } else { "▶ Play selection" };
+                if ui
+                    .add_enabled(can_play, egui::Button::new(play_label))
+                    .clicked()
+                {
+                    self.toggle_play_selection();
+                }
+
                 if ui
                     .add_enabled(
                         self.file.is_some() && !busy,
@@ -330,6 +362,12 @@ impl eframe::App for ClipApp {
                 }
             });
         });
+
+        // While a preview is playing, keep repainting so the button flips back
+        // to "Play" on its own once the clip finishes.
+        if self.is_playing() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
     }
 }
 
@@ -452,6 +490,19 @@ impl ClipApp {
 
         painter.rect_filled(rect, 4.0, visuals.extreme_bg_color);
 
+        // Nothing decoded yet: show a hint and skip the time-based drawing
+        // (which would divide by a zero duration).
+        if self.samples.is_empty() || self.duration <= 0.0 {
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Load a source to see its waveform.",
+                egui::FontId::proportional(14.0),
+                visuals.weak_text_color(),
+            );
+            return;
+        }
+
         // Waveform bars.
         let n = self.samples.len().max(1);
         let mid = rect.center().y;
@@ -516,6 +567,67 @@ impl ClipApp {
         }
     }
 
+    /// Whether a selection preview is currently playing.
+    fn is_playing(&self) -> bool {
+        self.playback
+            .as_ref()
+            .and_then(|p| p.sink.as_ref())
+            .is_some_and(|s| !s.empty())
+    }
+
+    /// Stop any in-progress preview.
+    fn stop_playback(&mut self) {
+        if let Some(pb) = self.playback.as_mut() {
+            if let Some(sink) = pb.sink.take() {
+                sink.stop();
+            }
+        }
+    }
+
+    /// Toggle preview playback of the selected range, using the cached 16 kHz
+    /// PCM. If something is already playing, stop it instead.
+    fn toggle_play_selection(&mut self) {
+        if self.is_playing() {
+            self.stop_playback();
+            return;
+        }
+
+        let Some(pcm) = self.pcm16k.clone() else { return };
+        let start = ((self.sel_in * PCM_SR as f32) as usize).min(pcm.len());
+        let end = ((self.sel_out * PCM_SR as f32) as usize).min(pcm.len());
+        if start >= end {
+            return;
+        }
+        let samples: Vec<f32> = pcm[start..end].to_vec();
+
+        // Open the audio device on first use; reuse it thereafter.
+        if self.playback.is_none() {
+            match rodio::OutputStream::try_default() {
+                Ok((stream, handle)) => {
+                    self.playback = Some(Playback {
+                        _stream: stream,
+                        handle,
+                        sink: None,
+                    })
+                }
+                Err(e) => {
+                    self.status = format!("Audio output unavailable: {e}");
+                    return;
+                }
+            }
+        }
+        let pb = self.playback.as_mut().expect("playback initialized above");
+
+        match rodio::Sink::try_new(&pb.handle) {
+            Ok(sink) => {
+                sink.append(rodio::buffer::SamplesBuffer::new(1, PCM_SR, samples));
+                sink.play();
+                pb.sink = Some(sink);
+            }
+            Err(e) => self.status = format!("Playback failed: {e}"),
+        }
+    }
+
     /// Export the selected range to the configured output directory.
     fn start_export(&mut self) {
         let Some(input) = self.file.clone() else { return };
@@ -542,35 +654,3 @@ fn default_output_dir() -> String {
         .unwrap_or_else(|_| ".".to_owned())
 }
 
-/// Demo transcript matching fixtures/sample.mp4 — replaced by whisper-rs output.
-fn demo_words() -> Vec<Word> {
-    [
-        (4.94, 5.54, "What"),
-        (5.54, 5.82, "the"),
-        (5.82, 6.22, "fuck"),
-        (6.22, 6.52, "is"),
-        (6.52, 6.80, "this"),
-        (6.80, 7.10, "piece"),
-        (7.10, 7.36, "of"),
-        (7.36, 7.78, "shit?"),
-    ]
-    .into_iter()
-    .map(|(start, end, text)| Word {
-        start,
-        end,
-        text: text.to_owned(),
-    })
-    .collect()
-}
-
-/// Deterministic placeholder waveform so the panel isn't empty before decoding.
-fn synth_waveform(duration: f32) -> Vec<f32> {
-    let count = (duration * 100.0) as usize;
-    (0..count)
-        .map(|i| {
-            let t = i as f32 / 20.0;
-            let env = ((i as f32 / count as f32) * std::f32::consts::PI).sin();
-            (0.2 + 0.8 * (t.sin() * 0.5 + 0.5)) * env
-        })
-        .collect()
-}

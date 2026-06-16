@@ -12,6 +12,7 @@ crossbeam-channel = "0.5"  # worker -> UI messaging for long-running jobs
 symphonia = { version = "0.5", features = ["all"] }  # decode -> waveform + PCM
 whisper-rs = "0.16"        # transcription (whisper.cpp bindings); needs CMake to build
 ureq = "2"                 # blocking HTTPS for on-demand model download (no async runtime)
+rodio = { version = "0.19", default-features = false }  # preview playback of the selected range
 
 # Added at later milestones (see ARCHITECTURE.md):
 #   rodio            = "0.19"   # preview playback
@@ -27,3 +28,12 @@ embed-assets = []
 
 [profile.release]
 opt-level = 3
+
+# Workaround for a debug-only crash on recent macOS: objc2 0.4.1 (pulled in via
+# eframe 0.28 -> winit 0.29 -> icrate) runs a `#[cfg(debug_assertions)]` ObjC
+# method-signature check that panics enumerating `NSScreen` at launch
+# ("expected return type code 'q', but found 'Q'"). Compiling objc2 without
+# debug assertions removes the check while keeping them on for our own code, so
+# plain `cargo run` works without needing --release.
+[profile.dev.package.objc2]
+debug-assertions = false
