@@ -29,12 +29,46 @@ select clip in/out points, and export the clip.
 
 ## Build & run
 
-Requires Rust (https://rustup.rs) and `ffmpeg` on PATH (export uses it).
+### Required tools
+
+| Tool | Why | Download |
+|------|-----|----------|
+| Rust | builds the app | https://rustup.rs |
+| CMake | build-time: compiles whisper.cpp | https://cmake.org/download/ |
+| LLVM / libclang | build-time: bindgen FFI for whisper-rs | https://releases.llvm.org/ |
+| ffmpeg | runtime: clip export + download merge | https://ffmpeg.org/download.html (Windows static: https://www.gyan.dev/ffmpeg/builds/) |
+| yt-dlp | runtime: URL / YouTube download | https://github.com/yt-dlp/yt-dlp/releases |
+
+The base whisper model downloads automatically on first use. ffmpeg and yt-dlp
+are only needed on `PATH` for a default `cargo run`; the
+`--features embed-assets` release bundles them into the binary instead.
 
 ```powershell
 winget install Rustlang.Rustup   # if you don't have Rust yet, then restart shell
 cargo run
 ```
+
+### macOS (build from source)
+
+> Not yet tested on macOS — developed and verified on Windows. The code has no
+> hard Windows dependencies and CI builds macOS (Intel + Apple Silicon), but
+> expect possible first-build tweaks.
+
+`whisper-rs` compiles whisper.cpp, so the build machine needs **CMake** and
+**libclang/LLVM** (bindgen); a default run also needs **ffmpeg** and **yt-dlp**
+on `PATH` (export + URL download). The base model downloads on first use.
+
+```bash
+brew install cmake llvm ffmpeg yt-dlp        # rustup separately if needed
+export LIBCLANG_PATH="$(brew --prefix llvm)/lib"   # so bindgen finds libclang
+cargo run
+```
+
+The single self-contained binary (`cargo build --release --features embed-assets`)
+embeds ffmpeg + yt-dlp + the base model. Those live in `vendor/<target-triple>/`
+and `models/`, which are **gitignored — not in the repo**: either run the release
+workflow (`.github/workflows/release.yml`, which stages them per-arch) or place
+them there manually first. A plain `cargo run` does not need them.
 
 ## Status — milestone 1 (skeleton)
 Working: window, file picker, transcript list (demo data), waveform panel with
