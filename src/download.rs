@@ -189,10 +189,11 @@ mod tests {
             decoded.pcm16k.len()
         );
 
-        let model = crate::resources::model_path(crate::model::WhisperModelKind::Base);
+        let kind = crate::model::WhisperModelKind::Base;
+        let model = crate::resources::model_path(kind);
         assert!(model.is_file(), "base model required at {}", model.display());
         let words =
-            crate::transcribe::transcribe(&model, &decoded.pcm16k, &cancel, |_p| {})
+            crate::transcribe::transcribe(&model, kind, &decoded.pcm16k, &cancel, |_p| {})
                 .expect("transcribe failed");
         let text: String = words
             .iter()

@@ -474,6 +474,7 @@ impl ClipApp {
         self.phase = Phase::Transcribing { progress: 0.0 };
         crate::transcribe::spawn_transcribe(
             model,
+            self.model_kind,
             pcm,
             self.tx.clone(),
             self.ctx_for_workers.clone(),
