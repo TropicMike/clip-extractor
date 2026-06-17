@@ -35,6 +35,8 @@ pub struct ClipApp {
     words: Vec<Word>,
     sel_in: f32,
     sel_out: f32,
+    /// Index of the word that anchors a click+Shift-click range selection.
+    word_anchor: Option<usize>,
     dragging: Option<Handle>,
     status: String,
 
@@ -73,6 +75,7 @@ impl ClipApp {
             words: Vec::new(),
             sel_in: 0.0,
             sel_out: 0.0,
+            word_anchor: None,
             dragging: None,
             status: "Open a media file to begin.".to_owned(),
             source_input: String::new(),
@@ -180,6 +183,7 @@ impl ClipApp {
                 WorkerMsg::TranscribeDone(words) => {
                     self.status = format!("Transcription complete — {} words.", words.len());
                     self.words = words;
+                    self.word_anchor = None;
                     self.phase = Phase::Idle;
                     self.cancel = None;
                 }
@@ -313,20 +317,34 @@ impl eframe::App for ClipApp {
             if self.words.is_empty() {
                 ui.label("No transcript yet — load a source to transcribe it.");
             } else {
-                ui.label("Click a word to set the selection to that word.");
+                ui.label("Click a word to select it; Shift+click another to select the range.");
                 egui::ScrollArea::vertical()
                     .max_height(220.0)
                     .show(ui, |ui| {
                         ui.horizontal_wrapped(|ui| {
                             let words = self.words.clone();
-                            for w in &words {
+                            for (i, w) in words.iter().enumerate() {
                                 let selected = w.start >= self.sel_in && w.end <= self.sel_out;
-                                if ui
-                                    .selectable_label(selected, format!("{} ", w.text))
-                                    .clicked()
-                                {
-                                    self.sel_in = w.start;
-                                    self.sel_out = w.end;
+                                let resp = ui.selectable_label(selected, format!("{} ", w.text));
+                                if resp.clicked() {
+                                    let shift = ui.input(|i| i.modifiers.shift);
+                                    match (shift, self.word_anchor) {
+                                        // Shift+click extends from the anchor word
+                                        // to the clicked one (in either direction).
+                                        (true, Some(anchor)) => {
+                                            let (lo, hi) =
+                                                (anchor.min(i), anchor.max(i));
+                                            self.sel_in = words[lo].start;
+                                            self.sel_out = words[hi].end;
+                                        }
+                                        // Plain click selects just this word and
+                                        // becomes the anchor for a later range.
+                                        _ => {
+                                            self.word_anchor = Some(i);
+                                            self.sel_in = w.start;
+                                            self.sel_out = w.end;
+                                        }
+                                    }
                                 }
                             }
                         });
