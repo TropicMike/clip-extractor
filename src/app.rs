@@ -210,39 +210,45 @@ impl eframe::App for ClipApp {
 
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.add_space(4.0);
-            egui::Grid::new("inputs")
-                .num_columns(3)
-                .spacing([8.0, 6.0])
-                .show(ui, |ui| {
-                    ui.label("Source:");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.source_input)
-                            .hint_text("YouTube URL or local file path")
-                            .desired_width(520.0),
-                    );
-                    if ui.add_enabled(!busy, egui::Button::new("Browse…")).clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("Media", &["mp4", "mov", "mkv", "mp3", "wav", "m4a"])
-                            .pick_file()
-                        {
-                            self.source_input = path.display().to_string();
-                        }
-                    }
-                    ui.end_row();
+            // Plain horizontal rows (no Grid, which caches/constrains column
+            // widths): a fixed-width label, then a text field that fills all the
+            // remaining width up to the trailing Browse button.
+            let label_w = 72.0;
+            let button_w = 88.0;
 
-                    ui.label("Output dir:");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.out_dir)
-                            .hint_text("folder where clips are saved")
-                            .desired_width(520.0),
-                    );
-                    if ui.add_enabled(!busy, egui::Button::new("Browse…")).clicked() {
-                        if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-                            self.out_dir = dir.display().to_string();
-                        }
+            ui.horizontal(|ui| {
+                ui.add_sized([label_w, 20.0], egui::Label::new("Source:"));
+                let field_w = (ui.available_width() - button_w).max(240.0);
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.source_input)
+                        .hint_text("YouTube URL or local file path")
+                        .desired_width(field_w),
+                );
+                if ui.add_enabled(!busy, egui::Button::new("Browse…")).clicked() {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("Media", &["mp4", "mov", "mkv", "mp3", "wav", "m4a"])
+                        .pick_file()
+                    {
+                        self.source_input = path.display().to_string();
                     }
-                    ui.end_row();
-                });
+                }
+            });
+
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.add_sized([label_w, 20.0], egui::Label::new("Output dir:"));
+                let field_w = (ui.available_width() - button_w).max(240.0);
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.out_dir)
+                        .hint_text("folder where clips are saved")
+                        .desired_width(field_w),
+                );
+                if ui.add_enabled(!busy, egui::Button::new("Browse…")).clicked() {
+                    if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                        self.out_dir = dir.display().to_string();
+                    }
+                }
+            });
 
             ui.add_space(2.0);
             ui.horizontal(|ui| {
