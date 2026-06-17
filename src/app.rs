@@ -164,7 +164,7 @@ impl ClipApp {
                     };
                     self.status = format!("Downloading model… {:.0}%", pct * 100.0);
                 }
-                WorkerMsg::ModelReady(_) => {
+                WorkerMsg::ModelReady => {
                     self.cancel = None;
                     self.start_transcription();
                 }

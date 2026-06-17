@@ -26,8 +26,6 @@ pub enum OutputFormat {
 }
 
 impl OutputFormat {
-    // Used by the export routine (M6).
-    #[allow(dead_code)]
     pub fn ext(self) -> &'static str {
         match self {
             OutputFormat::Mp3 => "mp3",
@@ -59,8 +57,6 @@ impl WhisperModelKind {
     }
 
     /// ggml model filename (English-only weights, matching the validated fixture).
-    // Used by the model loader/downloader (M5/M8).
-    #[allow(dead_code)]
     pub fn filename(self) -> &'static str {
         match self {
             WhisperModelKind::Base => "ggml-base.en.bin",
@@ -70,7 +66,6 @@ impl WhisperModelKind {
     }
 
     /// Download URL for on-demand fetch (M8).
-    #[allow(dead_code)]
     pub fn url(self) -> &'static str {
         match self {
             WhisperModelKind::Base => {
@@ -86,7 +81,7 @@ impl WhisperModelKind {
     }
 
     /// Whether this model ships embedded in the binary (M9).
-    #[allow(dead_code)]
+    #[cfg_attr(not(feature = "embed-assets"), allow(dead_code))]
     pub fn is_embedded(self) -> bool {
         matches!(self, WhisperModelKind::Base)
     }
@@ -94,8 +89,6 @@ impl WhisperModelKind {
 
 /// The current long-running job, if any. Drives the progress widget and
 /// disables actions while work is in flight.
-// Variants are filled in across milestones M4–M8; allow the unused ones for now.
-#[allow(dead_code)]
 pub enum Phase {
     Idle,
     Downloading { pct: f32, label: String },
@@ -107,8 +100,6 @@ pub enum Phase {
 /// Messages sent from worker threads back to the UI thread. The UI owns the
 /// single `Receiver` and drains it once per frame; each worker holds a cloned
 /// `Sender` and calls `ctx.request_repaint()` after sending so the UI wakes.
-// Most variants are produced once their owning milestone lands (M4–M8).
-#[allow(dead_code)]
 pub enum WorkerMsg {
     // Download (yt-dlp) — M7
     DownloadProgress { pct: f32, eta: String },
@@ -125,7 +116,7 @@ pub enum WorkerMsg {
 
     // Model fetch (whisper ggml) — M8
     ModelProgress { pct: f32 },
-    ModelReady(PathBuf),
+    ModelReady,
     ModelFailed(String),
 
     // Transcribe (whisper-rs) — M5

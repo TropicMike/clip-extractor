@@ -112,7 +112,7 @@ pub fn spawn_ensure_model(
     std::thread::spawn(move || {
         let path = model_path(kind);
         if path.is_file() {
-            let _ = tx.send(WorkerMsg::ModelReady(path));
+            let _ = tx.send(WorkerMsg::ModelReady);
             ctx.request_repaint();
             return;
         }
@@ -121,7 +121,7 @@ pub fn spawn_ensure_model(
         #[cfg(feature = "embed-assets")]
         if kind.is_embedded() {
             let msg = match extract(&models_dir(), kind.filename(), embedded::BASE_MODEL) {
-                Ok(p) => WorkerMsg::ModelReady(p),
+                Ok(_) => WorkerMsg::ModelReady,
                 Err(e) => WorkerMsg::ModelFailed(format!("Could not extract model: {e}")),
             };
             let _ = tx.send(msg);
@@ -136,7 +136,7 @@ pub fn spawn_ensure_model(
             progress_ctx.request_repaint();
         });
         let msg = match result {
-            Ok(true) => WorkerMsg::ModelReady(path),
+            Ok(true) => WorkerMsg::ModelReady,
             Ok(false) => WorkerMsg::ModelFailed("Model download cancelled.".to_owned()),
             Err(e) => WorkerMsg::ModelFailed(format!("Model download failed: {e}")),
         };
